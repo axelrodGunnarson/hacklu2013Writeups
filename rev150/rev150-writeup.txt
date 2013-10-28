@@ -1,0 +1,79 @@
+Here we are, second post second write-up.
+we are going to analyze the reverse 150, a nice win32 executable called RoboAuth. As always, at the end of this post you will find a link to a github repo with the write-up and the original executable so that you can repeat the challenge.
+
+Let's start!
+
+The introduction to the challenge said that the flag should be written as flag1_flag2, therefore we expect to have some kind of double password check.
+
+As always, we start with a "file" command in order to understand some details about the executable, and we find
+
+RoboAuth.exe: PE32 executable for MS Windows (console) Intel 80386 32-bit
+
+Ok,
+time for some Windows VM!
+
+Open it and launch it gives you this nice introduction, followed by a request for a password
+
+<div class="separator" style="clear: both; text-align: center;">
+<a href="http://2.bp.blogspot.com/-Jze5TMEk95o/Um1iEnu_KOI/AAAAAAAAA84/uPY0G_Y0d4c/s1600/roboauth_1.jpg" imageanchor="1" style="margin-left: 1em; margin-right: 1em;"><img border="0" src="http://2.bp.blogspot.com/-Jze5TMEk95o/Um1iEnu_KOI/AAAAAAAAA84/uPY0G_Y0d4c/s320/roboauth_1.jpg" /></a></div>
+
+Very nice, let's see if we find something interesting in the strings of the program.
+Strings in ida give us the position where we find the initial text and the "you passed level 1" string inside the executable, nice!
+Looking at the code at the location where we find the "you passed level 1" string, we see A LOT of mov instructions and finally what ever password cracker want to see:
+scanf
+strcmp
+puts
+
+<div class="separator" style="clear: both; text-align: center;">
+<a href="http://2.bp.blogspot.com/-PSdWVrqVRSE/Um1jdz_GZRI/AAAAAAAAA9E/x--Qb3SsvFA/s1600/roboauth_1stpass.jpg" imageanchor="1" style="margin-left: 1em; margin-right: 1em;"><img border="0" src="http://2.bp.blogspot.com/-PSdWVrqVRSE/Um1jdz_GZRI/AAAAAAAAA9E/x--Qb3SsvFA/s320/roboauth_1stpass.jpg" /></a></div>
+
+Hey, that's easy! so now we know that the program is simply getting at most 20 chars checking against a fixed string and printing out the result, just run it in a debugger, stopping at that point and see at the compared values.
+Personally, I do static analysis on ida and dynamic one on ollydbg as I think ida pro debugger sucks, so here is the screenshot of the memory dump from olly
+
+<div class="separator" style="clear: both; text-align: center;">
+<a href="http://4.bp.blogspot.com/-H3z-vYt0XI0/Um1kRrZSEkI/AAAAAAAAA9M/V4mmM1GLaB4/s1600/roboauth_1st_passDump.jpg" imageanchor="1" style="margin-left: 1em; margin-right: 1em;"><img border="0" src="http://4.bp.blogspot.com/-H3z-vYt0XI0/Um1kRrZSEkI/AAAAAAAAA9M/V4mmM1GLaB4/s320/roboauth_1st_passDump.jpg" /></a></div>
+
+Great!
+now we have the 1st password, "R0b0RUlez!", ok let's move on!
+
+After the first password we are requested for a second one.
+As before, we look for another string and we can't find it. Ok, so where is the second check?! well we know that the second check is going to do a puts and a scanf, let's look for that function then!
+We discover that there is a second scanf in the function at 40157f, so let's look at it!
+
+<div class="separator" style="clear: both; text-align: center;">
+<a href="http://4.bp.blogspot.com/-yUZVeotdOU8/Um2ja5Xl1VI/AAAAAAAAA9c/7V5gHyUXTlY/s1600/Screen+Shot+2013-10-27+at+8.11.19+PM.jpg" imageanchor="1" style="margin-left: 1em; margin-right: 1em;"><img border="0" src="http://4.bp.blogspot.com/-yUZVeotdOU8/Um2ja5Xl1VI/AAAAAAAAA9c/7V5gHyUXTlY/s320/Screen+Shot+2013-10-27+at+8.11.19+PM.jpg" /></a></div>
+
+As we can see, there is a scanf as in the first password scenario, then a call to 401547 and then a test followed by a puts, nice! usual acquire, check and decision based on the check!
+the problem here is that when we put a bp on the call sub_401547 instruction we see that the program won't stop, but instead we are stopped on a int 3 instruction.
+Fiu, that means, as we can expect from the end of the function before (ExitProcess), that the program for checking the second password is actually another process launched by the father, so in order to debug we should do very nasty tricks etc etc etc (read: I am lazy, if I have another way to acquire the same information why I should not use it!?).
+
+So what we can do!? well actually we have the executable, so why we can't tamper it? as we can see, the parameters used by the function sub_401547 are in positon [esp+38h+var_34] and var_38, one of them is the string acquired through the scanf and the other one is used during the check.. probably our delightful password! the idea is to display it instead of the string displayed by the puts after the check, bypassing the test (obviously). A bunch of NOPS and the edit of
+
+mov eax, ds:dword_40ada4
+
+into
+
+mov eax, ds:dword_40ad98
+
+will do the trick! 
+
+<div class="separator" style="clear: both; text-align: center;">
+<a href="http://2.bp.blogspot.com/-sINdx1Og2PI/Um2oI3SrXiI/AAAAAAAAA9o/aDXtjTEv-lg/s1600/Screen+Shot+2013-10-28+at+12.55.47+AM.jpg" imageanchor="1" style="margin-left: 1em; margin-right: 1em;"><img border="0" src="http://2.bp.blogspot.com/-sINdx1Og2PI/Um2oI3SrXiI/AAAAAAAAA9o/aDXtjTEv-lg/s320/Screen+Shot+2013-10-28+at+12.55.47+AM.jpg" /></a></div>
+
+nice! here is our beautiful string, "u1nnf2lg\x02" (\x02 being the little face in win32).
+let's look at the check function:
+
+<div class="separator" style="clear: both; text-align: center;">
+<a href="http://2.bp.blogspot.com/-1gBp1bIob8o/Um2pBBcpw9I/AAAAAAAAA94/v6wjYfc6RLI/s1600/Screen+Shot+2013-10-28+at+12.59.34+AM.jpg" imageanchor="1" style="margin-left: 1em; margin-right: 1em;"><img border="0" src="http://2.bp.blogspot.com/-1gBp1bIob8o/Um2pBBcpw9I/AAAAAAAAA94/v6wjYfc6RLI/s320/Screen+Shot+2013-10-28+at+12.59.34+AM.jpg" /></a></div>
+
+even better, the check is just XORing every byte of the solution and checking it with our buffer up to the byte \x02, a one line python operation:
+
+print "".join([chr(ord(el)^2) for el in "u1nnf2lg"])
+
+and we obtain our second password, w3lldone
+
+I find it to be a really nice way to tamper an executable in order to display memory content we can use, especially when using a debugger would require tracing different processes etc..
+
+In the end.. here you will find the <a href="https://github.com/axelrodGunnarson/hacklu2013Writeups/tree/master/rev150">github repo</a> with the original file, the tampered file which display the second password and this writeup.
+
+Enjoy! 
